@@ -15,16 +15,16 @@ num_cores = 4
 
 class ListDataGenerator(Sequence):
     'Generates data for Keras'
-    def __init__(self, train, batch_size=128, shuffle=True, debug=False):
+    def __init__(self, train, max_len_encoding_passage, max_len_encoding_query,
+    			 batch_size=128, shuffle=True, debug=False):
         'Initialization'
-        
         self.unique_ques = len(np.unique(train.query_id.values))
         self.query_id = train.query_id.values.reshape((self.unique_ques,-1))
         self.query = train["query"].values.reshape((self.unique_ques,-1))[:,0]
         self.passage = train["passage_text"].values.reshape((self.unique_ques,-1))
         self.label = train.label.values.reshape((self.unique_ques,-1))
-        self.query_len = np.vstack(train.query_mask.values).reshape((self.unique_ques,-1, MAX_LEN_ENCODING_QUERY))[:,0]
-        self.passage_len = np.vstack(train.passage_mask.values).reshape((self.unique_ques,-1, MAX_LEN_ENCODING_PASSAGE))
+        self.query_len = np.vstack(train.query_mask.values).reshape((self.unique_ques,-1, max_len_encoding_query))[:,0]
+        self.passage_len = np.vstack(train.passage_mask.values).reshape((self.unique_ques,-1, max_len_encoding_passage))
         
         self.shuffle = shuffle
         self.batch_size = batch_size
@@ -88,14 +88,15 @@ stopset = list(string.punctuation)
 
 def tokenize(text, max_len):
     new_seq = []
+    mask = np.zeros(max_len, dtype="int8")
     tokens = word_tokenize(text.lower())
     tokens = [token for token in tokens if token not in stopset]
     for i in range(max_len):
         try:
             new_seq.append(tokens[i])
+            mask[i] = 1
         except:
             new_seq.append("__PAD__")
-    mask = np.array((np.array(new_seq)!= "__pad__"), dtype="int8")
     return " ".join(new_seq), mask
 
 def specific_save_epoch(model,path):

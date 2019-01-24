@@ -33,7 +33,6 @@ train = pd.read_csv(os.path.join(PROC_DATA_PATH,"undersample_train.tsv"), sep= "
 val = pd.read_csv(os.path.join(PROC_DATA_PATH,"val.tsv"), sep= "\t")
 
 
-
 model_param = dict(hidden_dim=100,
                    enc_timesteps=MAX_LEN_ENCODING_QUERY,
                    dec_timesteps=MAX_LEN_ENCODING_PASSAGE,
@@ -49,19 +48,25 @@ def ElmoEmbedding(x):
                       signature="default")["word_emb"]
 
 
-# Preprocess the data for Elmo format
+
 def preprocess(df):
     df["passage_text"], df["passage_mask"] = zip(*df.passage_text.apply(lambda x: tokenize(x, MAX_LEN_ENCODING_PASSAGE)))
     df["query"], df["query_mask"] = zip(*df["query"].apply(lambda x: tokenize(x, MAX_LEN_ENCODING_QUERY)))
     return df
 
+
+# Preprocess the data for Elmo format
 train = parallelize_dataframe(train, preprocess)
 val = parallelize_dataframe(val, preprocess)
 
-undersampled_train = ListDataGenerator(train, batch_size=64)
+
+train = ListDataGenerator(train, batch_size=64, max_len_encoding_passage = 70,
+                                      max_len_encoding_query = 15)
+
 
 ## Initialize model
 training_model, prediction_model = DynamicClipAttention(model_param, ElmoEmbedding)
+
 
 ## Initializing variable
 sess = tf.Session()
@@ -75,13 +80,14 @@ best_val_mrr = 0.0
 # 3 epochs seems to give the optimum MRR on validation dataset
 NUM_EPOCHS = 10
 
+
 for epoch in range(0, NUM_EPOCHS):
-    training_model.fit_generator(undersampled_train,
+    training_model.fit_generator(train,
                         epochs=(epoch+1),
                         verbose=1,
                         class_weight=None,
                         initial_epoch=epoch)
-    print("Done")
+    print("Evaluating")
     try:
         val_preds = prediction_model.predict([val["query"].values,
                                       val["passage_text"].values,
@@ -89,7 +95,7 @@ for epoch in range(0, NUM_EPOCHS):
                                       np.vstack(val.passage_mask.values)],
                                       batch_size = 128,
                                       verbose = 1)
-        val_mrr = mean_reciprocal_rank(val_preds, val.label)
+        val_mrr = mean_reciprocal_rank(val_preds, val.label.values)
         print("Validation mrr:{}".format(val_mrr))
         if val_mrr >  best_val_mrr:
             best_val_mrr = val_mrr
@@ -99,13 +105,21 @@ for epoch in range(0, NUM_EPOCHS):
 
 
 # Predict on test dataset
-test = pd.read_csv(os.path.join(DATASET_PATH,"test.tsv"), sep= "\t")
+test = pd.read_csv(os.path.join(PROC_DATA_PATH,"test.tsv"), sep= "\t")
 test = parallelize_dataframe(test, preprocess)
+
+print("Predicting on test dataset")
 test_preds = prediction_model.predict([test["query"].values,
                                       test["passage_text"].values,
                                       np.vstack(test.query_mask.values),
                                       np.vstack(test.passage_mask.values)],
-                                      batch_size = 256,
+                                      batch_size = 128,
                                       verbose = 1)
 
+test_dataset = pd.DataFrame(test.query_id, columns= ["query_id"])
+test_dataset["passage_id"] = test.passage_id
+test_dataset["score"] = test_preds
+
+print("Genrating submission", MODEL_NAME+".zip" )
 prepare_submission(test_dataset, MODEL_NAME)
+
